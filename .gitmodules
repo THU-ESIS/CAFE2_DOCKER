@@ -1,0 +1,6 @@
+[submodule "sources/CAFE2_NODE"]
+	path = sources/CAFE2_NODE
+	url = https://github.com/THU-ESIS/CAFE2_NODE.git
+[submodule "sources/CAFE2_PORTAL"]
+	path = sources/CAFE2_PORTAL
+	url = https://github.com/THU-ESIS/CAFE2_PORTAL.git

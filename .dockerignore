@@ -1,0 +1,17 @@
+*
+!compose.yaml
+!node.Dockerfile
+!portal.Dockerfile
+!README.md
+!images.lock.example
+!sources/
+!sources/**
+!nclscripts/
+!nclscripts/**
+!mysql/
+!mysql/**
+
+# Runtime-only content must never enter the Docker build context.
+secrets/
+data/
+**/.git

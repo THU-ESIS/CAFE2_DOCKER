@@ -1,0 +1,36 @@
+name: Validate deployment configuration
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check tracked files and generate disposable CI configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^secrets/[^.][^/]*$|^data/|^\.env$|\.pem$|\.tar$)'; then
+            echo 'Unexpected runtime content in Git'; exit 1
+          fi
+          test "$(git ls-files 'nclscripts/*.ncl' | wc -l)" -eq 13
+          test "$(git ls-files --stage sources/ | awk '$1 == "160000" {n++} END {print n}')" -eq 2
+          sh -n scripts/init-config.sh
+          sh scripts/init-config.sh
+          if sh scripts/init-config.sh; then
+            echo 'Helper incorrectly overwrote existing secrets'; exit 1
+          fi
+          cp .env.example .env
+          mkdir -p data
+          for profile in central worker local portal all-in-one; do
+            docker compose --profile "$profile" config --quiet
+          done
+          # Image lock uses Compose variable names and must be passed explicitly.
+          CAFE2_MYSQL_IMAGE=mysql:8.0.46 docker compose --profile local config --quiet

@@ -1,0 +1,6 @@
+secrets/*
+!secrets/.gitignore
+data/*
+.env
+images.lock
+dist/

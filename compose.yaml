@@ -1,0 +1,139 @@
+name: cafe2-v1
+
+services:
+  mysql:
+    image: ${CAFE2_MYSQL_IMAGE:-mysql:8.0.46}
+    # CAFE2's legacy grouped dataset query selects non-grouped node columns.
+    # Preserve strict checks while matching the upstream installation guide.
+    command: ["--sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"]
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql-root-password
+      MYSQL_DATABASE: CAFEPORTAL
+      MYSQL_USER: cafe2
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql-app-password
+    secrets:
+      - mysql-root-password
+      - mysql-app-password
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$(cat /run/secrets/mysql-root-password)\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  portal:
+    profiles: [portal, local, all-in-one]
+    image: ${CAFE2_PORTAL_IMAGE:-cafe2-v1-portal:latest}
+    build:
+      context: .
+      dockerfile: portal.Dockerfile
+    environment:
+      CAFE_PORTAL_PORT: 4000
+      CAFE_PORTAL_DB_HOST: mysql
+      CAFE_PORTAL_DB_PORT: 3306
+      CAFE_PORTAL_DB_USERNAME: cafe2
+      CAFE_PORTAL_DB_DATABASE: CAFEPORTAL
+      CAFE_PORTAL_DB_PASSWORD_FILE: /run/secrets/mysql-app-password
+      CAFE_PORTAL_APP_SECRET_FILE: /run/secrets/portal-app-secret
+      CAFE_PORTAL_LOG_DIR: /CAFE/log/portal
+      CAFE_PORTAL_CAFE_WORKER_URL: ${CAFE_PORTAL_CAFE_WORKER_URL:-http://local:8080/datamanager}
+    secrets:
+      - mysql-app-password
+      - portal-app-secret
+    volumes:
+      - portal-data:/CAFE/log
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${PORTAL_HTTP_PORT:-4000}:4000"
+
+  central:
+    profiles: [central, all-in-one]
+    image: ${CAFE2_CENTRAL_IMAGE:-cafe2-v1-central:latest}
+    build:
+      context: .
+      dockerfile: node.Dockerfile
+      target: central
+    environment: {}
+    secrets:
+      - source: cafe2-central-jdbc
+        target: cafe2-jdbc.properties
+    volumes:
+      - central-logs:/CAFE/log
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${CENTRAL_HTTP_PORT:-8081}:8080"
+
+  worker:
+    profiles: [worker, all-in-one]
+    image: ${CAFE2_WORKER_IMAGE:-cafe2-v1-worker:latest}
+    build:
+      context: .
+      dockerfile: node.Dockerfile
+      target: worker
+    secrets:
+      - source: cafe2-worker-jdbc
+        target: cafe2-jdbc.properties
+    volumes:
+      - type: bind
+        source: ${CAFE_DATA_HOST:-./data}
+        target: /CAFE_DATA
+        read_only: true
+      - worker-runtime:/CAFE/script_tmp
+      - worker-logs:/CAFE/log
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${WORKER_HTTP_PORT:-8082}:8080"
+
+  local:
+    profiles: [local]
+    image: ${CAFE2_LOCAL_IMAGE:-cafe2-v1-local:latest}
+    build:
+      context: .
+      dockerfile: node.Dockerfile
+      target: local
+    secrets:
+      - source: cafe2-local-jdbc
+        target: cafe2-jdbc.properties
+    volumes:
+      - type: bind
+        source: ${CAFE_DATA_HOST:-./data}
+        target: /CAFE_DATA
+        read_only: true
+      - local-runtime:/CAFE/script_tmp
+      - local-logs:/CAFE/log
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${LOCAL_HTTP_PORT:-8083}:8080"
+
+volumes:
+  mysql-data:
+  portal-data:
+  central-logs:
+  worker-runtime:
+  worker-logs:
+  local-runtime:
+  local-logs:
+
+secrets:
+  mysql-root-password:
+    file: ./secrets/mysql-root-password
+  mysql-app-password:
+    file: ./secrets/mysql-app-password
+  portal-app-secret:
+    file: ./secrets/portal-app-secret
+  cafe2-central-jdbc:
+    file: ./secrets/cafe2-central-jdbc.properties
+  cafe2-worker-jdbc:
+    file: ./secrets/cafe2-worker-jdbc.properties
+  cafe2-local-jdbc:
+    file: ./secrets/cafe2-local-jdbc.properties
