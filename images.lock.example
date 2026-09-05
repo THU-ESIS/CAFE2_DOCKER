@@ -1,0 +1,7 @@
+# Copy to images.lock after publishing images. Keep the exact digest printed by
+# `docker buildx imagetools inspect` or by the registry after pushing.
+#
+# portal=ghcr.io/your-org/cafe2-portal:v1.11.0@sha256:<digest>
+# central=ghcr.io/your-org/cafe2-central:v1.11.0@sha256:<digest>
+# worker=ghcr.io/your-org/cafe2-worker:v1.11.0@sha256:<digest>
+# local=ghcr.io/your-org/cafe2-local:v1.11.0@sha256:<digest>
