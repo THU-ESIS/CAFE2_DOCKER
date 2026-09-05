@@ -21,6 +21,11 @@ are recorded in REVIEW.md and in the submodule gitlinks.
   that the Local service can read its actual mounted JDBC file.
 - Windows configuration helper generated six matching files without a UTF-8
   BOM, refused a second run, and left the existing file hashes unchanged.
+- Linux helper passed shell syntax validation, generated six files and refused
+  a second run inside an isolated Linux container. All five Compose profile
+  configurations passed `docker compose config --quiet` locally.
+- The temporary review containers were stopped after testing; their volumes
+  were retained. Existing cafe2-v1 containers were not stopped by this review.
 
 ## Still required for full acceptance
 
