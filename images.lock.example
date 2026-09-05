@@ -1,7 +1,8 @@
-# Copy to images.lock after publishing images. Keep the exact digest printed by
-# `docker buildx imagetools inspect` or by the registry after pushing.
-#
-# portal=ghcr.io/your-org/cafe2-portal:v1.11.0@sha256:<digest>
-# central=ghcr.io/your-org/cafe2-central:v1.11.0@sha256:<digest>
-# worker=ghcr.io/your-org/cafe2-worker:v1.11.0@sha256:<digest>
-# local=ghcr.io/your-org/cafe2-local:v1.11.0@sha256:<digest>
+# EXAMPLE ONLY: no images have been published by this template.
+# Release maintainer supplies images.lock with real manifest digests.
+# Load it with --env-file .env --env-file images.lock (Compose does not auto-load it).
+# CAFE2_PORTAL_IMAGE=ghcr.io/thu-esis/cafe2-portal@sha256:REPLACE_WITH_DIGEST
+# CAFE2_CENTRAL_IMAGE=ghcr.io/thu-esis/cafe2-central@sha256:REPLACE_WITH_DIGEST
+# CAFE2_WORKER_IMAGE=ghcr.io/thu-esis/cafe2-worker@sha256:REPLACE_WITH_DIGEST
+# CAFE2_LOCAL_IMAGE=ghcr.io/thu-esis/cafe2-local@sha256:REPLACE_WITH_DIGEST
+# CAFE2_MYSQL_IMAGE=mysql@sha256:REPLACE_WITH_DIGEST

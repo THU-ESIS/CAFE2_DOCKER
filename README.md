@@ -4,6 +4,13 @@ This repository packages the CAFE2 v1.11.0 runtime for three CAFE2 node modes:
 `central`, `worker`, and `local`, plus the Portal and its MySQL database.
 The application sources are pinned as Git submodules to the `v1.11.0` tags.
 
+Current status: **test candidate**, with local build/startup verification.
+No registry image is published merely by cloning this repository. Check the
+Release assets for an actual `images.lock` before using registry image mode.
+Read [the engineering review](docs/REVIEW.md), [release procedure](docs/RELEASING.md),
+and [Chinese quick start](docs/QUICKSTART.zh-CN.md).
+Actual validation coverage is recorded in [TESTING.md](docs/TESTING.md).
+
 ## Choose a delivery mode
 
 There are two supported delivery modes:
@@ -31,6 +38,8 @@ CAFE2 deployment modes selected in the web UI.
 - Internet access for the first build or image pull.
 - A CAFE2 data directory for Local or Worker deployments.
 - Runtime secret files described below.
+- The validated platform is **linux/amd64**. ARM64 is not validated; NCL and
+  the legacy native Node dependency must not be assumed to support it.
 
 Windows users can run the commands from PowerShell. WSL2 is used internally by
 Docker Desktop when its Linux engine is enabled; manually entering WSL is not
@@ -62,6 +71,25 @@ THU-ESIS/CAFE2_PORTAL:v1.11.0
 
 Create these files under `secrets/`. They are intentionally ignored by Git:
 
+For a **new installation**, generate mutually consistent random credentials:
+
+```powershell
+# Windows PowerShell, from the repository directory
+powershell -NoProfile -File scripts/init-config.ps1
+Copy-Item .env.example .env
+```
+
+```bash
+# Linux, requires openssl
+sh scripts/init-config.sh
+cp .env.example .env
+```
+
+Both helpers refuse to overwrite existing credentials. Do not regenerate them
+for an existing database volume: MySQL initialization only runs on an empty
+volume. Restrict Windows ACLs on `secrets/` to the deployment account; the Linux
+helper uses mode 0700 for the directory and 0600 for files.
+
 ```text
 mysql-root-password
 mysql-app-password
@@ -74,15 +102,28 @@ cafe2-local-jdbc.properties
 The Node JDBC files contain the complete runtime properties. For example:
 
 ```properties
-jdbc.url=jdbc:mysql://mysql:3306/CAFEWORKER?defaultCharacterEncoding=utf-8&autoReconnect=true&failOverReadOnly=false&maxReconnects=2
+jdbc.url=jdbc:mysql://mysql:3306/CAFEWORKER?characterEncoding=UTF-8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
 jdbc.username=cafe2
 jdbc.password=replace-me
 jdbc.driver=com.mysql.cj.jdbc.Driver
 ```
 
 Use the database name and credentials appropriate for the selected deployment.
+Central uses `CAFECENTRAL`; Worker and Local each use `CAFEWORKER` in their own
+deployment. Do **not** activate Worker and Local simultaneously in the same
+Compose project with these defaults: they would share the deployment table.
+Use separate project names/directories/ports for independent installations.
+All JDBC passwords must equal `mysql-app-password`; the Node username is `cafe2`.
+Use UTF-8 **without BOM** when creating files manually.
+
+The example disables TLS only for the bundled MySQL on the private Compose
+network (MySQL has no host port). For an external database, configure verified
+TLS rather than copying those connection options unchanged.
 The Portal reads its database password and application secret from Compose
 secrets at runtime; they are not stored in the image.
+Ordinary Compose secrets are read-only file mounts, not an encrypted vault:
+the application can read them, and a host/Docker administrator can access them.
+Do not put them in Dockerfiles, build arguments, Git, image archives or Releases.
 
 Copy `.env.example` to `.env` and set at least:
 
@@ -105,7 +146,7 @@ Build the selected profile and start it without rebuilding a second time:
 
 ```bash
 docker compose --profile local build
-docker compose --profile local up --no-build
+docker compose --profile local up -d --no-build
 ```
 
 Other examples:
@@ -139,10 +180,10 @@ Image mode uses the same `compose.yaml`, but skips local builds. Put the
 published image references in `.env`:
 
 ```dotenv
-CAFE2_PORTAL_IMAGE=ghcr.io/your-org/cafe2-portal:v1.11.0
-CAFE2_CENTRAL_IMAGE=ghcr.io/your-org/cafe2-central:v1.11.0
-CAFE2_WORKER_IMAGE=ghcr.io/your-org/cafe2-worker:v1.11.0
-CAFE2_LOCAL_IMAGE=ghcr.io/your-org/cafe2-local:v1.11.0
+CAFE2_PORTAL_IMAGE=ghcr.io/thu-esis/cafe2-portal:RELEASE_TAG
+CAFE2_CENTRAL_IMAGE=ghcr.io/thu-esis/cafe2-central:RELEASE_TAG
+CAFE2_WORKER_IMAGE=ghcr.io/thu-esis/cafe2-worker:RELEASE_TAG
+CAFE2_LOCAL_IMAGE=ghcr.io/thu-esis/cafe2-local:RELEASE_TAG
 ```
 
 Then pull and start:
@@ -159,11 +200,22 @@ For the strongest reproducibility, record the image digest printed after
 publishing and use a reference such as:
 
 ```dotenv
-CAFE2_WORKER_IMAGE=ghcr.io/your-org/cafe2-worker:v1.11.0@sha256:REPLACE_WITH_DIGEST
+CAFE2_WORKER_IMAGE=ghcr.io/thu-esis/cafe2-worker@sha256:REPLACE_WITH_DIGEST
 ```
 
 The version tag is readable for humans; the digest identifies the exact image
-manifest. Keep the four final references in `images.lock`.
+manifest. Keep the final references in `images.lock`.
+Include `CAFE2_MYSQL_IMAGE` too. **Compose does not load `images.lock`
+automatically**; use the supplied release lock explicitly on every command:
+
+```bash
+docker compose --env-file .env --env-file images.lock --profile local pull
+docker compose --env-file .env --env-file images.lock --profile local up -d --no-build
+```
+
+Do not use `images.lock.example` as if it contained real digests. Image-only
+users do not need application submodules, Java, Maven, Node or NCL installed
+on the host. They still need Compose, `mysql/init`, local secrets and data.
 
 ## Access and first configuration
 
@@ -201,7 +253,11 @@ CAFE_DATA/
 ```
 
 The exact CMIP5/CMIP6 data request structure and file naming rules remain the
-same as the original CAFE2 Node installation guide.
+same as the [pinned CAFE2 Node installation guide](https://github.com/THU-ESIS/CAFE2_NODE/blob/v1.11.0/README.md).
+After deploying a Worker/Local, use `/datamanager/web/parser` and submit
+`/CAFE_DATA`. Open the Portal, register/sign in, check that indexed datasets
+appear, submit an analysis, and open/download its result. These are application
+acceptance steps; HTTP 200 alone does not validate them.
 
 ## Paths inside the containers
 
@@ -236,3 +292,23 @@ docker compose --profile worker build --no-cache
 The first successful test should verify that MySQL is healthy, the Node
 deployment page returns HTTP 200, NCL reports 6.6.2, and the Worker/Local image
 contains the 13 fixed `.ncl` scripts.
+
+MySQL's SQL mode intentionally excludes `ONLY_FULL_GROUP_BY` for the existing
+`queryDistinctModel` mapper; other strict checks remain enabled. This matches
+the original installation guide without changing application SQL. It also
+means ambiguous grouped node columns retain the legacy behavior.
+
+## Backup, upgrades and remote access
+
+Before an upgrade, preserve `.env`, `secrets/`, the exact image lock, and a
+consistent MySQL backup plus task output volumes. Stop application writes or
+use a consistent database backup method; copying live database files is not a
+reliable backup. Restore into a separate project and verify before switching.
+New images do not automatically migrate existing schemas; initialization SQL
+under `mysql/init` is **not** an upgrade script and must not be rerun on live data.
+
+Defaults publish application ports on all host interfaces. Test on a trusted
+network with host firewall restrictions. Do not advertise this legacy test
+candidate as hardened for public production: Node 12 and several dependencies
+are old, and the build reported security advisories. Public service operation
+needs a separate dependency review, access controls and HTTPS configuration.
