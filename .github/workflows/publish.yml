@@ -1,0 +1,95 @@
+name: Publish GHCR images
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New prerelease tag (for example v1.11.0-rc.1)'
+        required: true
+        default: v1.11.0-rc.1
+permissions:
+  contents: read
+concurrency:
+  group: ghcr-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'THU-ESIS/CAFE2_DOCKER' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+          test -z "$(git ls-remote --tags origin "refs/tags/$VERSION")"
+      - name: Build images from this commit
+        run: docker compose build --build-arg VCS_REF="$GITHUB_SHA" --build-arg IMAGE_VERSION="$VERSION" central worker local portal
+      - name: Test newly built images
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh scripts/init-config.sh
+          mkdir -p data
+          docker compose --profile local up -d --no-build --wait --wait-timeout 180
+          curl --fail --retry 20 --retry-all-errors --retry-delay 3 http://localhost:4000/ -o /dev/null
+          curl --fail --retry 20 --retry-all-errors --retry-delay 3 http://localhost:8083/datamanager/web/deployment -o /dev/null
+          docker compose exec -T local sh -c 'ncl -V; test "$(find /CAFE/nclscripts -name "*.ncl" | wc -l)" -eq 13'
+          docker compose --profile local stop
+          export CAFE_PORTAL_CAFE_WORKER_URL=http://worker:8080/datamanager
+          docker compose --profile all-in-one up -d --no-build --wait --wait-timeout 180
+          for port in 4000 8081 8082; do
+            path=/datamanager/web/deployment
+            if [ "$port" = 4000 ]; then path=/; fi
+            curl --fail --retry 20 --retry-all-errors --retry-delay 3 "http://localhost:$port$path" -o /dev/null
+          done
+          docker compose exec -T worker sh -c 'ncl -V; test "$(find /CAFE/nclscripts -name "*.ncl" | wc -l)" -eq 13'
+          docker compose exec -T mysql sh -c 'MYSQL_PWD="$(cat /run/secrets/mysql-app-password)" mysql -ucafe2 CAFECENTRAL -e "SELECT wn.id, wn.name, model FROM model_file LEFT JOIN worker_node wn ON model_file.node_id=wn.id GROUP BY model;"'
+      - name: Push tested images and record digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          mkdir -p dist
+          for service in portal central worker local; do
+            ref="ghcr.io/thu-esis/cafe2-$service"
+            docker tag "cafe2-v1-$service:latest" "$ref:$VERSION"
+            docker push "$ref:$VERSION"
+            digest=$(docker image inspect "$ref:$VERSION" --format '{{index .RepoDigests 0}}')
+            [[ "$digest" == "$ref@sha256:"* ]]
+            printf 'CAFE2_%s_IMAGE=%s\n' "${service^^}" "$digest" >> dist/images.lock
+          done
+          digest=$(docker image inspect mysql:8.0.46 --format '{{index .RepoDigests 0}}')
+          printf 'CAFE2_MYSQL_IMAGE=%s\n' "$digest" >> dist/images.lock
+      - name: Verify pulling locked images
+        run: docker compose --env-file dist/images.lock --profile all-in-one --profile local pull
+      - name: Create deployment release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="dist/cafe2-deploy-$VERSION"
+          mkdir -p "$bundle/secrets"
+          cp compose.yaml node.Dockerfile portal.Dockerfile .env.example README.md README.zh-CN.md "$bundle/"
+          cp -r mysql scripts docs "$bundle/"
+          cp dist/images.lock "$bundle/"
+          git submodule status > "$bundle/SOURCES.txt"
+          printf 'Docker source: %s\nPlatform: linux/amd64\n' "$GITHUB_SHA" >> "$bundle/SOURCES.txt"
+          tar -czf "dist/cafe2-deploy-$VERSION.tar.gz" -C dist "cafe2-deploy-$VERSION"
+          (cd dist && sha256sum "cafe2-deploy-$VERSION.tar.gz" images.lock > SHA256SUMS)
+          printf 'linux/amd64 test candidate. Build and startup checks passed; real-data analysis acceptance remains pending.\n\nDownload the deployment archive and follow README.zh-CN.md or README.md. GHCR packages must be public for anonymous pulls.\n' > dist/release-notes.md
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$VERSION" -f message="CAFE2 Docker $VERSION" -f object="$GITHUB_SHA" -f type=commit --jq .sha)
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$tag_sha"
+          gh release create "$VERSION" --verify-tag --prerelease --title "CAFE2 Docker $VERSION" --notes-file dist/release-notes.md "dist/cafe2-deploy-$VERSION.tar.gz" dist/images.lock dist/SHA256SUMS
+      - name: Stop CI containers
+        if: always()
+        run: docker compose --profile local --profile all-in-one stop
