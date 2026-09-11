@@ -16,6 +16,11 @@ RUN --mount=type=cache,id=cafe2-portal-npm,target=/root/.npm \
 RUN NODE_OPTIONS=--openssl-legacy-provider npm run build
 
 FROM node:12.22.12-buster-slim AS runtime
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/THU-ESIS/CAFE2_DOCKER" \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.version=$IMAGE_VERSION
 WORKDIR /CAFE/CAFE_PORTAL
 ENV NODE_ENV=production
 ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org

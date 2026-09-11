@@ -23,6 +23,11 @@ RUN --mount=type=cache,target=/root/.m2 \
     -Djdbc.database=runtime-placeholder
 
 FROM tomcat:9.0.107-jdk21-temurin AS tomcat-base
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/THU-ESIS/CAFE2_DOCKER" \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.version=$IMAGE_VERSION
 RUN rm -rf /usr/local/tomcat/webapps/*
 COPY --from=java-build /src/datamanager-web/target/datamanager-web.war \
     /usr/local/tomcat/webapps/datamanager.war
